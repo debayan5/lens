@@ -7,7 +7,10 @@ targets:
   Lens:
     type: application
     platform: iOS
-    sources: [Lens]
+    sources:
+      - LensApp.swift
+      - CameraModel.swift
+      - ContentView.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.debayan.lens
