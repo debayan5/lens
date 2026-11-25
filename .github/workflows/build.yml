@@ -7,6 +7,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Generate app icon
+        run: swift make_icon.swift
       - run: brew install xcodegen
       - run: xcodegen generate
       - name: Build unsigned
