@@ -11,15 +11,18 @@ targets:
       - LensApp.swift
       - CameraModel.swift
       - ContentView.swift
+      - Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.debayan.lens
         PRODUCT_NAME: Lens
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "2"
         TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_CFBundleDisplayName: Lens
         INFOPLIST_KEY_NSCameraUsageDescription: "Lens uses the camera to take photos."
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Lens saves your photos to your library."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
