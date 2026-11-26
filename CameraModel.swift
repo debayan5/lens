@@ -4,6 +4,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import Vision
 import UIKit
+import CoreMotion
 
 enum CamMode: String, CaseIterable { case photo = "PHOTO", portrait = "PORTRAIT", night = "LOW LIGHT" }
 
@@ -25,6 +26,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published var flash: AVCaptureDevice.FlashMode = .off
     @Published var screenFlash = false
     @Published var depthOK = true
+    @Published var appleProc = false
+    @Published var steady = false
+    @Published var waiting = false
+    @Published var fps = 30
     @Published var zoom: CGFloat = 1
     @Published var focusPoint: CGPoint?
     @Published var thumb: UIImage?
@@ -40,6 +45,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private let nightFrames = 8
     private let aperture: Double = 2.8   // portrait blur: lower = stronger
     private var origBrightness: CGFloat = 0.5
+    private var captureApple = false
+    private let motion = CMMotionManager()
     private var lastFocusNorm = CGPoint(x: 0.5, y: 0.5)
 
     var isFront: Bool { current?.position == .front }
@@ -82,6 +89,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     func select(_ d: AVCaptureDevice, zoom z: CGFloat = 1) {
         current = d
         zoom = z
+        let fast = !rawMode && mode != .portrait      // 60 fps viewfinder when possible
+        let bias: Float = rawMode ? -1.0 : 0          // protect highlights in RAW
         queue.async {
             self.session.beginConfiguration()
             self.session.sessionPreset = .photo
@@ -95,26 +104,54 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.session.commitConfiguration()
             self.output.isDepthDataDeliveryEnabled = self.output.isDepthDataDeliverySupported
             self.device = d
+            self.output.maxPhotoQualityPrioritization = .quality
             try? d.lockForConfiguration()
+            let fpsNow = fast ? self.use60(d) : 30
             if d.activeFormat.isVideoHDRSupported {
                 d.automaticallyAdjustsVideoHDREnabled = false
                 d.isVideoHDREnabled = false
             }
             d.videoZoomFactor = min(max(z, d.minAvailableVideoZoomFactor), d.maxAvailableVideoZoomFactor)
+            d.setExposureTargetBias(min(max(bias, d.minExposureTargetBias), d.maxExposureTargetBias))
             d.unlockForConfiguration()
             if !self.session.isRunning { self.session.startRunning() }
             DispatchQueue.main.async {
                 self.previewLayer?.session = self.session
                 self.depthOK = self.output.isDepthDataDeliverySupported
+                self.fps = fpsNow
             }
         }
     }
+
+    private func use60(_ d: AVCaptureDevice) -> Int {
+        let cands = d.formats.filter { f in
+            let dim = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+            return Int(dim.width) * 3 == Int(dim.height) * 4 && dim.width >= 1440
+                && f.videoSupportedFrameRateRanges.contains { $0.maxFrameRate >= 60 }
+                && f.supportedMaxPhotoDimensions.contains { $0.width >= 4000 }   // keep full-res stills
+        }
+        guard let best = cands.max(by: {
+            CMVideoFormatDescriptionGetDimensions($0.formatDescription).width <
+            CMVideoFormatDescriptionGetDimensions($1.formatDescription).width }) else { return 30 }
+        d.activeFormat = best
+        d.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 60)
+        d.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 60)
+        if let md = best.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
+            output.maxPhotoDimensions = md
+        }
+        return 60
+    }
+
+    private func reselect() { if let d = current { select(d, zoom: zoom) } }
+
+    func toggleRaw() { rawMode.toggle(); if rawMode { appleProc = false }; reselect() }
+    func toggleApple() { appleProc.toggle(); if appleProc { rawMode = false }; reselect() }
 
     func setMode(_ m: CamMode) {
         guard m != mode, !busy else { return }
         mode = m
         UISelectionFeedbackGenerator().selectionChanged()
-        if !isFront { selectBack() }
+        if !isFront { selectBack() } else { reselect() }
     }
 
     func flip() {
@@ -168,12 +205,19 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     func capture() {
+        if waiting { motion.stopDeviceMotionUpdates(); waiting = false; return }   // tap again to cancel
         guard !busy else { return }
+        if steady { waitSteady { self.performCapture() } } else { performCapture() }
+    }
+
+    private func performCapture() {
         captureMode = mode
+        captureApple = appleProc && mode == .photo
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         if mode == .night { startNight(); return }
         let raw = rawMode && mode == .photo, fl = flash, m = mode
         let screen = isFront && needsFlash()
+        let apple = captureApple
 
         let shoot = {
             self.queue.async {
@@ -187,6 +231,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         s.isDepthDataDeliveryEnabled = true
                         s.embedsDepthDataInPhoto = true
                     }
+                } else if apple {
+                    let codec: AVVideoCodecType = self.output.availablePhotoCodecTypes.contains(.hevc) ? .hevc : .jpeg
+                    s = AVCapturePhotoSettings(format: [AVVideoCodecKey: codec])
+                    s.photoQualityPrioritization = .quality
+                    if !screen, self.output.supportedFlashModes.contains(fl) { s.flashMode = fl }
                 } else if raw, let r = self.output.availableRawPhotoPixelFormatTypes
                     .first(where: { !AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) {
                     s = AVCapturePhotoSettings(rawPixelFormatType: r)
@@ -218,6 +267,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 return
             }
             if self.captureMode == .portrait { self.portrait(photo); return }
+            if self.captureApple { self.appleSave(photo); return }
             guard let pb = photo.pixelBuffer else { self.fail(); return }
             switch self.captureMode {
             case .night: self.nightStep(photo, pb)
@@ -232,6 +282,42 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             if self.screenFlash {
                 self.screenFlash = false
                 UIScreen.main.brightness = self.origBrightness
+            }
+        }
+    }
+
+    // MARK: Apple processing, steady shutter, thumbnails
+
+    private func setThumb(_ img: CIImage) {
+        let t = img.transformed(by: CGAffineTransform(scaleX: 0.08, y: 0.08))
+        if let cg = ctx.createCGImage(t, from: t.extent) {
+            DispatchQueue.main.async { self.thumb = UIImage(cgImage: cg) }
+        }
+    }
+
+    private func appleSave(_ photo: AVCapturePhoto) {
+        guard let d = photo.fileDataRepresentation() else { fail(); return }
+        if let img = CIImage(data: d, options: [.applyOrientationProperty: true]) { setThumb(img) }
+        let heic = output.availablePhotoCodecTypes.contains(.hevc)
+        save(d, uti: heic ? "public.heic" : "public.jpeg")
+    }
+
+    private func waitSteady(_ go: @escaping () -> Void) {
+        guard motion.isDeviceMotionAvailable else { go(); return }
+        waiting = true
+        var still = 0, ticks = 0
+        motion.deviceMotionUpdateInterval = 1.0 / 60
+        motion.startDeviceMotionUpdates(to: .main) { [weak self] dm, _ in
+            guard let self = self, let dm = dm, self.waiting else { return }
+            ticks += 1
+            let r = dm.rotationRate, a = dm.userAcceleration
+            let spin = (r.x * r.x + r.y * r.y + r.z * r.z).squareRoot()
+            let shake = (a.x * a.x + a.y * a.y + a.z * a.z).squareRoot()
+            still = (spin < 0.08 && shake < 0.04) ? still + 1 : 0
+            if still >= 8 || ticks > 150 {          // ~0.13 s of stillness, or give up after 2.5 s
+                self.motion.stopDeviceMotionUpdates()
+                self.waiting = false
+                go()
             }
         }
     }

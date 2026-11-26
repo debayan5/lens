@@ -71,8 +71,14 @@ struct ContentView: View {
                 if !m.toast.isEmpty { badge(m.toast).padding(.top, 10) }
                 Spacer()
                 if m.busy && m.mode == .night { badge("Hold still…").padding(.bottom, 8) }
+                if m.waiting { badge("Hold steady… tap to cancel").padding(.bottom, 8) }
                 if m.mode == .portrait && !m.depthOK { badge("Depth not available").padding(.bottom, 8) }
                 lensChips.padding(.bottom, 10)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if m.fps >= 60 {
+                Text("60").font(.system(size: 11, weight: .bold)).foregroundColor(accent).padding(8)
             }
         }
         .aspectRatio(3.0 / 4.0, contentMode: .fit)
@@ -108,7 +114,7 @@ struct ContentView: View {
     // MARK: Bars
 
     var topBar: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 8) {
             if m.mode != .night && (m.isFront || m.mode == .photo) {
                 Button { m.cycleFlash() } label: {
                     Image(systemName: flashIcon).font(.system(size: 18, weight: .semibold))
@@ -120,7 +126,11 @@ struct ContentView: View {
             if m.isFront {
                 pill("Mirror", on: m.mirrorSelfie) { m.mirrorSelfie.toggle() }
             }
-            if m.mode == .photo { pill(m.rawMode ? "RAW" : "PNG", on: m.rawMode) { m.rawMode.toggle() } }
+            if m.mode == .photo {
+                pill(m.rawMode ? "RAW" : (m.appleProc ? "HEIC" : "PNG"), on: m.rawMode) { m.toggleRaw() }
+                pill("APPLE", on: m.appleProc) { m.toggleApple() }
+            }
+            pill("STEADY", on: m.steady) { m.steady.toggle() }
         }
         .padding(.horizontal, 20)
     }

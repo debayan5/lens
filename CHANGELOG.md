@@ -1,5 +1,11 @@
 # Lens changelog
 
+## 1.3
+- RAW: captures are now exposed 1 stop lower to protect highlights (DNG files were coming out too bright).
+- 60 fps viewfinder: smoother preview when the camera has a 4:3 full-resolution format that supports it (a "60" shows top-left when active). Portrait and RAW stay at 30 fps.
+- New APPLE button (Photo mode): turns on Apple's own image processing (Smart HDR, Deep Fusion, tone mapping) and saves as HEIC. It switches RAW off.
+- New STEADY button: after you press the shutter, Lens waits for the motion sensors to show the phone has stopped shaking, then takes the photo. Tap the shutter again to cancel; it gives up and shoots after 2.5 s.
+
 ## 1.2
 - Removed the M button and the manual ISO / shutter sliders. Exposure is fully automatic.
 - Renamed "Night" mode to "Low Light".
