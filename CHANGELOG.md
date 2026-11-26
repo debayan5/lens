@@ -1,5 +1,11 @@
 # Lens changelog
 
+## 1.6.1 (hotfix)
+- The big circles behind the last-photo thumbnail and the camera-switch button were iOS adding its own button background, not Lens. All buttons now use a flat style, so the circles are gone.
+- Volume buttons: the button handler now goes through one debounced path, and a fallback watches the volume level in case the system doesn't deliver button events. Pressing either volume button should take the photo in every mode.
+- Portrait: new LOW to HIGH slider under the viewfinder controls how strong the background blur is. It changes the live preview immediately and is used for the saved photo.
+- A small "Lens 1.6.1" toast shows when the app opens, so you can confirm which build is installed. Zoom stops (0.5 / 1 / 2), the exact zoom readout and the pinch badge from 1.6 are unchanged; if you don't see them, the new build isn't installed yet.
+
 ## 1.6
 - Portrait: the blur was landing on the subject. Portrait now builds its own depth mask (sharp at the depth you tap, blurred everywhere else, including far backgrounds) instead of Apple's blur filter, whose focus-area setting was almost certainly the cause. Tap the subject to choose what stays sharp.
 - Portrait: real-time blur in the viewfinder, using the same depth mask as the saved photo.

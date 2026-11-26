@@ -1,23 +1,43 @@
 import SwiftUI
 import AVFoundation
+import AVKit
 
 final class PreviewUIView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var pv: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    let live = CALayer()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        live.contentsGravity = .resizeAspectFill
+        live.masksToBounds = true
+        live.isHidden = true
+        layer.addSublayer(live)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func layoutSubviews() { super.layoutSubviews(); live.frame = bounds }
 }
 
 struct Preview: UIViewRepresentable {
-    let model: CameraModel
+    @ObservedObject var model: CameraModel
     func makeUIView(context: Context) -> PreviewUIView {
         let v = PreviewUIView()
         v.backgroundColor = .black
         v.pv.session = model.session
         v.pv.videoGravity = .resizeAspectFill
         model.previewLayer = v.pv
+        model.liveLayer = v.live
+        if #available(iOS 17.2, *) {          // volume buttons (and Camera Control) take the photo
+            let m = model
+            let i = AVCaptureEventInteraction { [weak m] event in
+                if event.phase == .ended { m?.buttonCapture() }
+            }
+            v.addInteraction(i)
+        }
         return v
     }
     func updateUIView(_ v: PreviewUIView, context: Context) {
         if v.pv.session == nil { v.pv.session = model.session }
+        v.live.isHidden = !model.portraitLive
     }
 }
 
@@ -32,6 +52,7 @@ struct PressStyle: ButtonStyle {
 struct ContentView: View {
     @StateObject private var m = CameraModel()
     @State private var baseZoom: CGFloat = 1
+    @State private var pinching = false
     private let accent = Color(red: 1.0, green: 0.8, blue: 0.0)
 
     var body: some View {
@@ -41,6 +62,7 @@ struct ContentView: View {
                 topBar.frame(height: 56)
                 viewfinder
                 Spacer(minLength: 0)
+                if m.mode == .portrait { blurSlider.padding(.horizontal, 28).padding(.bottom, 12) }
                 modeSelector.padding(.bottom, 16)
                 bottomBar.padding(.bottom, 20)
             }
@@ -48,7 +70,11 @@ struct ContentView: View {
                 Color(red: 1, green: 0.97, blue: 0.92).ignoresSafeArea().allowsHitTesting(false)
             }
         }
-        .onAppear { m.start() }
+        .buttonStyle(PressStyle())      // flat buttons: stops iOS adding its own big circle behind them
+        .onAppear {
+            m.start()
+            m.announce("Lens " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""))
+        }
         .statusBarHidden()
     }
 
@@ -60,8 +86,11 @@ struct ContentView: View {
                 .onTapGesture(count: 2) { m.flip() }
                 .onTapGesture { m.focus(at: $0) }
                 .gesture(MagnificationGesture()
-                    .onChanged { m.setZoom(baseZoom * $0) }
-                    .onEnded { _ in baseZoom = m.zoom })
+                    .onChanged { s in
+                        if !pinching { pinching = true; baseZoom = m.zoom }
+                        m.setZoom(baseZoom * s)
+                    }
+                    .onEnded { _ in pinching = false })
 
             if let p = m.focusPoint {
                 Rectangle().stroke(accent, lineWidth: 1.5)
@@ -69,6 +98,7 @@ struct ContentView: View {
             }
             VStack {
                 if !m.toast.isEmpty { badge(m.toast).padding(.top, 10) }
+                if m.showZoom { badge(String(format: "%.1f×", m.displayZoom)).padding(.top, 10) }
                 Spacer()
                 if m.busy && m.mode == .night { badge("Hold still…").padding(.bottom, 8) }
                 if m.waiting { badge("Hold steady… tap to cancel").padding(.bottom, 8) }
@@ -89,10 +119,12 @@ struct ContentView: View {
     var lensChips: some View {
         HStack(spacing: 8) {
             if !m.isFront && m.mode != .portrait {
-                ForEach(m.backLenses, id: \.uniqueID) { d in
-                    let on = d.uniqueID == m.current?.uniqueID
-                    Button { m.select(d); baseZoom = 1 } label: {
-                        Text(on ? "\(fmt(m.factor(d)))×" : fmt(m.factor(d)))
+                let z = m.displayZoom
+                let near = m.nearestStop(z)
+                ForEach(m.zoomStops, id: \.self) { stop in
+                    let on = stop == near
+                    Button { m.goZoom(stop) } label: {
+                        Text(chipLabel(stop, z, on))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(on ? accent : .white)
                             .fixedSize()
@@ -102,6 +134,11 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    func chipLabel(_ stop: Double, _ z: Double, _ on: Bool) -> String {
+        guard on else { return fmt(stop) }
+        return (abs(z - stop) < 0.05 ? fmt(stop) : String(format: "%.1f", z)) + "×"
     }
 
     func fmt(_ v: Double) -> String { v == v.rounded() ? "\(Int(v))" : String(format: "%.1f", v) }
@@ -147,6 +184,14 @@ struct ContentView: View {
         }
     }
 
+    var blurSlider: some View {
+        HStack(spacing: 10) {
+            Text("LOW").font(.system(size: 10, weight: .bold)).foregroundColor(.white.opacity(0.7))
+            Slider(value: $m.blurLevel, in: 0...1).tint(accent)
+            Text("HIGH").font(.system(size: 10, weight: .bold)).foregroundColor(.white.opacity(0.7))
+        }
+    }
+
     var modeSelector: some View {
         HStack(spacing: 26) {
             ForEach(CamMode.allCases, id: \.self) { mode in
@@ -170,7 +215,6 @@ struct ContentView: View {
                     } else {
                         Image(systemName: "photo.on.rectangle").foregroundColor(.white.opacity(0.6))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color.white.opacity(0.12))
                     }
                 }
                 .frame(width: 54, height: 54)
@@ -192,9 +236,8 @@ struct ContentView: View {
             Spacer()
             Button { m.flip() } label: {
                 Image(systemName: "camera.rotate.fill")
-                    .font(.system(size: 22)).foregroundColor(.white)
+                    .font(.system(size: 28)).foregroundColor(.white)
                     .frame(width: 54, height: 54)
-                    .background(Circle().fill(Color.white.opacity(0.16)))
             }
         }
         .padding(.horizontal, 28)

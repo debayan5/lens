@@ -55,6 +55,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published var portraitLive = false
     @Published var showZoom = false
     private var zoomToken = 0
+    private var volObs: NSKeyValueObservation?
+    private var lastButton = Date.distantPast
+    private var blurFactor = 0.017
+    @Published var blurLevel: Double = 0.5 { didSet { blurFactor = 0.004 + blurLevel * 0.026 } }
     private var lastFocusNorm = CGPoint(x: 0.5, y: 0.5)
 
     var isFront: Bool { current?.position == .front }
@@ -62,6 +66,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     // MARK: Setup
 
     func start() {
+        watchVolume()
         AVCaptureDevice.requestAccess(for: .video) { ok in
             guard ok else { return }
             let found = AVCaptureDevice.DiscoverySession(
@@ -261,6 +266,26 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     func cycleFlash() {
         flash = flash == .off ? .auto : (flash == .auto ? .on : .off)
     }
+
+    // MARK: Hardware buttons
+
+    // Volume / Camera Control press (debounced so two mechanisms can't double-fire)
+    func buttonCapture() {
+        guard Date().timeIntervalSince(lastButton) > 0.8 else { return }
+        lastButton = Date()
+        DispatchQueue.main.async { self.capture() }
+    }
+
+    // Fallback if the system doesn't deliver button events to the app: watch the volume level
+    private func watchVolume() {
+        guard volObs == nil else { return }
+        _ = Sounds.shared                          // activates the audio session
+        volObs = AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.new]) { [weak self] _, _ in
+            self?.buttonCapture()
+        }
+    }
+
+    func announce(_ t: String) { note(t) }
 
     // MARK: Controls
 
@@ -631,7 +656,7 @@ extension CameraModel: AVCaptureDataOutputSynchronizerDelegate {
         let vb = CIFilter.maskedVariableBlur()
         vb.inputImage = img.clampedToExtent()
         vb.mask = soft
-        vb.radius = Float(e.width * 0.014)
+        vb.radius = Float(e.width * blurFactor)
         return (vb.outputImage ?? img).cropped(to: e)
     }
 }
