@@ -90,7 +90,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         current = d
         zoom = z
         let portrait = mode == .portrait
-        let fast = !rawMode && mode != .portrait      // 60 fps viewfinder when possible
+        let fast = !rawMode && !appleProc && mode != .portrait      // 60 fps viewfinder when possible
         let bias: Float = rawMode ? -1.0 : 0          // protect highlights in RAW
         queue.async {
             self.output.isDepthDataDeliveryEnabled = false

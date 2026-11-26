@@ -1,5 +1,8 @@
 # Lens changelog
 
+## 1.5
+- APPLE mode no longer uses the 60 fps camera format. That format can disable Deep Fusion / full Smart HDR, which is likely why APPLE shots looked weaker than the stock camera. With APPLE on, the viewfinder runs at 30 fps on the standard photo format.
+
 ## 1.4
 - Removed the "60" label from the viewfinder (the 60 fps preview itself stays).
 - Portrait: Lens now picks a camera format that supports depth, sets its depth format and turns depth delivery on after the format change. Before, depth was switched on too early, so Portrait reported "Depth not available". If a lens still has no depth, the message now names the camera.
