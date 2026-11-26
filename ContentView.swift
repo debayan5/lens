@@ -41,9 +41,11 @@ struct ContentView: View {
                 topBar.frame(height: 56)
                 viewfinder
                 Spacer(minLength: 0)
-                if m.manual { manualPanel.padding(.horizontal, 20).padding(.bottom, 10) }
                 modeSelector.padding(.bottom, 16)
                 bottomBar.padding(.bottom, 20)
+            }
+            if m.screenFlash {
+                Color(red: 1, green: 0.97, blue: 0.92).ignoresSafeArea().allowsHitTesting(false)
             }
         }
         .onAppear { m.start() }
@@ -69,6 +71,7 @@ struct ContentView: View {
                 if !m.toast.isEmpty { badge(m.toast).padding(.top, 10) }
                 Spacer()
                 if m.busy && m.mode == .night { badge("Hold still…").padding(.bottom, 8) }
+                if m.mode == .portrait && !m.depthOK { badge("Depth not available").padding(.bottom, 8) }
                 lensChips.padding(.bottom, 10)
             }
         }
@@ -106,7 +109,7 @@ struct ContentView: View {
 
     var topBar: some View {
         HStack(spacing: 18) {
-            if !m.isFront && m.mode == .photo {
+            if m.mode != .night && (m.isFront || m.mode == .photo) {
                 Button { m.cycleFlash() } label: {
                     Image(systemName: flashIcon).font(.system(size: 18, weight: .semibold))
                         .foregroundColor(m.flash == .off ? .white : accent)
@@ -118,7 +121,6 @@ struct ContentView: View {
                 pill("Mirror", on: m.mirrorSelfie) { m.mirrorSelfie.toggle() }
             }
             if m.mode == .photo { pill(m.rawMode ? "RAW" : "PNG", on: m.rawMode) { m.rawMode.toggle() } }
-            pill("M", on: m.manual) { m.manual.toggle() }
         }
         .padding(.horizontal, 20)
     }
@@ -137,15 +139,6 @@ struct ContentView: View {
                 .foregroundColor(on ? .black : .white)
                 .padding(.horizontal, 11).padding(.vertical, 6)
                 .background(Capsule().fill(on ? accent : Color.white.opacity(0.18)))
-        }
-    }
-
-    var manualPanel: some View {
-        VStack(spacing: 6) {
-            Text("ISO \(Int(m.iso))    1/\(Int(m.shutterDen))s")
-                .font(.caption.monospacedDigit()).foregroundColor(.white.opacity(0.8))
-            Slider(value: Binding(get: { Double(m.iso) }, set: { m.iso = Float($0) }), in: 25...3200).tint(accent)
-            Slider(value: $m.shutterDen, in: 2...2000).tint(accent)
         }
     }
 

@@ -5,7 +5,7 @@ import CoreImage.CIFilterBuiltins
 import Vision
 import UIKit
 
-enum CamMode: String, CaseIterable { case photo = "PHOTO", portrait = "PORTRAIT", night = "NIGHT" }
+enum CamMode: String, CaseIterable { case photo = "PHOTO", portrait = "PORTRAIT", night = "LOW LIGHT" }
 
 final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate {
     let session = AVCaptureSession()
@@ -23,9 +23,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published var rawMode = false
     @Published var mirrorSelfie = true
     @Published var flash: AVCaptureDevice.FlashMode = .off
-    @Published var manual = false { didSet { applyExposure() } }
-    @Published var iso: Float = 100 { didSet { applyExposure() } }
-    @Published var shutterDen: Double = 120 { didSet { applyExposure() } }
+    @Published var screenFlash = false
+    @Published var depthOK = true
     @Published var zoom: CGFloat = 1
     @Published var focusPoint: CGPoint?
     @Published var thumb: UIImage?
@@ -40,6 +39,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var nightO: Int32 = 6
     private let nightFrames = 8
     private let aperture: Double = 2.8   // portrait blur: lower = stronger
+    private var origBrightness: CGFloat = 0.5
+    private var lastFocusNorm = CGPoint(x: 0.5, y: 0.5)
 
     var isFront: Bool { current?.position == .front }
 
@@ -104,7 +105,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             if !self.session.isRunning { self.session.startRunning() }
             DispatchQueue.main.async {
                 self.previewLayer?.session = self.session
-                self.applyExposure()
+                self.depthOK = self.output.isDepthDataDeliverySupported
             }
         }
     }
@@ -128,23 +129,6 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     // MARK: Controls
 
-    func applyExposure() {
-        let manual = self.manual, iso = self.iso, den = self.shutterDen
-        queue.async {
-            guard let d = self.device else { return }
-            try? d.lockForConfiguration()
-            defer { d.unlockForConfiguration() }
-            if manual {
-                let f = d.activeFormat
-                let i = min(max(iso, f.minISO), f.maxISO)
-                let secs = min(max(1.0 / den, f.minExposureDuration.seconds), f.maxExposureDuration.seconds)
-                d.setExposureModeCustom(duration: CMTimeMakeWithSeconds(secs, preferredTimescale: 1_000_000), iso: i)
-            } else if d.isExposureModeSupported(.continuousAutoExposure) {
-                d.exposureMode = .continuousAutoExposure
-            }
-        }
-    }
-
     func setZoom(_ z: CGFloat) {
         queue.async {
             guard let d = self.device else { return }
@@ -160,12 +144,13 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         guard let layer = previewLayer else { return }
         let dp = layer.captureDevicePointConverted(fromLayerPoint: p)
         focusPoint = p
+        lastFocusNorm = CGPoint(x: p.x / max(layer.bounds.width, 1), y: p.y / max(layer.bounds.height, 1))
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.focusPoint = nil }
         queue.async {
             guard let d = self.device else { return }
             try? d.lockForConfiguration()
             if d.isFocusPointOfInterestSupported { d.focusPointOfInterest = dp; d.focusMode = .autoFocus }
-            if !self.manual, d.isExposurePointOfInterestSupported {
+            if d.isExposurePointOfInterestSupported {
                 d.exposurePointOfInterest = dp; d.exposureMode = .autoExpose
             }
             d.unlockForConfiguration()
@@ -176,24 +161,52 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     private var bgra: [String: Any] { [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA] }
 
+    private func needsFlash() -> Bool {
+        if flash == .on { return true }
+        guard flash == .auto, let d = device else { return false }
+        return d.iso > 500 || d.exposureDuration.seconds > 1.0 / 40
+    }
+
     func capture() {
         guard !busy else { return }
         captureMode = mode
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         if mode == .night { startNight(); return }
         let raw = rawMode && mode == .photo, fl = flash, m = mode
-        queue.async {
-            let s: AVCapturePhotoSettings
-            if raw, let r = self.output.availableRawPhotoPixelFormatTypes
-                .first(where: { !AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) {
-                s = AVCapturePhotoSettings(rawPixelFormatType: r)
-            } else {
-                s = AVCapturePhotoSettings(format: self.bgra)
-                s.photoQualityPrioritization = .speed
-                if m == .portrait, self.output.isDepthDataDeliveryEnabled { s.isDepthDataDeliveryEnabled = true }
-                if m == .photo, self.output.supportedFlashModes.contains(fl) { s.flashMode = fl }
+        let screen = isFront && needsFlash()
+
+        let shoot = {
+            self.queue.async {
+                let s: AVCapturePhotoSettings
+                if m == .portrait {
+                    self.output.isDepthDataDeliveryEnabled = self.output.isDepthDataDeliverySupported
+                    let codec: AVVideoCodecType = self.output.availablePhotoCodecTypes.contains(.hevc) ? .hevc : .jpeg
+                    s = AVCapturePhotoSettings(format: [AVVideoCodecKey: codec])
+                    s.photoQualityPrioritization = .speed
+                    if self.output.isDepthDataDeliveryEnabled {
+                        s.isDepthDataDeliveryEnabled = true
+                        s.embedsDepthDataInPhoto = true
+                    }
+                } else if raw, let r = self.output.availableRawPhotoPixelFormatTypes
+                    .first(where: { !AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) {
+                    s = AVCapturePhotoSettings(rawPixelFormatType: r)
+                } else {
+                    s = AVCapturePhotoSettings(format: self.bgra)
+                    s.photoQualityPrioritization = .speed
+                    if m == .photo, !screen, self.output.supportedFlashModes.contains(fl) { s.flashMode = fl }
+                }
+                self.output.capturePhoto(with: s, delegate: self)
             }
-            self.output.capturePhoto(with: s, delegate: self)
+        }
+
+        if screen {
+            // Front "Retina flash": full-white screen at max brightness, then shoot
+            origBrightness = UIScreen.main.brightness
+            UIScreen.main.brightness = 1.0
+            screenFlash = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shoot() }
+        } else {
+            shoot()
         }
     }
 
@@ -204,11 +217,21 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 if let d = photo.fileDataRepresentation() { self.save(d, uti: "com.adobe.raw-image") }
                 return
             }
+            if self.captureMode == .portrait { self.portrait(photo); return }
             guard let pb = photo.pixelBuffer else { self.fail(); return }
             switch self.captureMode {
             case .night: self.nightStep(photo, pb)
-            case .portrait: self.portrait(photo, pb)
+            case .portrait: break
             case .photo: self.savePNG(self.mirror(CIImage(cvPixelBuffer: pb).oriented(forExifOrientation: self.orient(photo))))
+            }
+        }
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+        DispatchQueue.main.async {
+            if self.screenFlash {
+                self.screenFlash = false
+                UIScreen.main.brightness = self.origBrightness
             }
         }
     }
@@ -223,21 +246,28 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 .transformed(by: CGAffineTransform(translationX: i.extent.width, y: 0))
     }
 
-    // MARK: Portrait (hardware depth)
+    // MARK: Portrait (Apple's native depth blur)
 
-    private func portrait(_ photo: AVCapturePhoto, _ pb: CVPixelBuffer) {
-        let o = orient(photo)
-        let base = CIImage(cvPixelBuffer: pb)
-        savePNG(mirror(base.oriented(forExifOrientation: o)), thumbnail: false)   // original
-        guard let dd = photo.depthData else { DispatchQueue.main.async { self.note("No depth data") }; return }
-        let disp = dd.converting(toDepthDataType: kCVPixelFormatType_DisparityFloat32)
-        let dimg = CIImage(cvPixelBuffer: disp.depthDataMap)
-        guard let f = CIFilter(name: "CIDepthBlurEffect") else { return }
+    private func portrait(_ photo: AVCapturePhoto) {
+        guard let data = photo.fileDataRepresentation(),
+              let base = CIImage(data: data, options: [.applyOrientationProperty: true]) else { fail(); return }
+        savePNG(mirror(base), thumbnail: false)   // keep the original
+        guard let disp = CIImage(data: data, options: [.auxiliaryDisparity: true, .applyOrientationProperty: true]),
+              let f = CIFilter(name: "CIDepthBlurEffect") else {
+            DispatchQueue.main.async { self.note("No depth data") }
+            return
+        }
+        let e = base.extent
+        let s = e.width * 0.2
+        let fx = lastFocusNorm.x * e.width, fy = (1 - lastFocusNorm.y) * e.height
         f.setValue(base, forKey: kCIInputImageKey)
-        f.setValue(dimg, forKey: "inputDisparityImage")
+        f.setValue(disp, forKey: "inputDisparityImage")
         f.setValue(aperture, forKey: "inputAperture")
+        f.setValue(CIVector(x: fx - s / 2, y: fy - s / 2, z: s, w: s), forKey: "inputFocusRect")
         if let out = f.outputImage {
-            savePNG(mirror(out.oriented(forExifOrientation: o)))
+            savePNG(mirror(out.cropped(to: e)))
+        } else {
+            DispatchQueue.main.async { self.note("Blur failed") }
         }
     }
 
