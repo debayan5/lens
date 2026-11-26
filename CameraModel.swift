@@ -89,9 +89,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     func select(_ d: AVCaptureDevice, zoom z: CGFloat = 1) {
         current = d
         zoom = z
+        let portrait = mode == .portrait
         let fast = !rawMode && mode != .portrait      // 60 fps viewfinder when possible
         let bias: Float = rawMode ? -1.0 : 0          // protect highlights in RAW
         queue.async {
+            self.output.isDepthDataDeliveryEnabled = false
             self.session.beginConfiguration()
             self.session.sessionPreset = .photo
             self.session.inputs.forEach { self.session.removeInput($0) }
@@ -102,11 +104,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 self.session.addOutput(self.output)
             }
             self.session.commitConfiguration()
-            self.output.isDepthDataDeliveryEnabled = self.output.isDepthDataDeliverySupported
             self.device = d
             self.output.maxPhotoQualityPrioritization = .quality
             try? d.lockForConfiguration()
             let fpsNow = fast ? self.use60(d) : 30
+            let depthNow = portrait ? self.useDepth(d) : false
             if d.activeFormat.isVideoHDRSupported {
                 d.automaticallyAdjustsVideoHDREnabled = false
                 d.isVideoHDREnabled = false
@@ -117,7 +119,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             if !self.session.isRunning { self.session.startRunning() }
             DispatchQueue.main.async {
                 self.previewLayer?.session = self.session
-                self.depthOK = self.output.isDepthDataDeliverySupported
+                self.depthOK = portrait ? depthNow : true
                 self.fps = fpsNow
             }
         }
@@ -140,6 +142,32 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             output.maxPhotoDimensions = md
         }
         return 60
+    }
+
+    // Pick a 4:3 format that can deliver depth, set its depth format, and turn depth delivery on
+    private func useDepth(_ d: AVCaptureDevice) -> Bool {
+        func still(_ f: AVCaptureDevice.Format) -> Int32 { f.supportedMaxPhotoDimensions.map { $0.width }.max() ?? 0 }
+        let cands = d.formats.filter { f in
+            let dim = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+            return !f.supportedDepthDataFormats.isEmpty && Int(dim.width) * 3 == Int(dim.height) * 4
+        }
+        guard let best = cands.max(by: { still($0) < still($1) }) else { return false }
+        d.activeFormat = best
+        let all = best.supportedDepthDataFormats
+        let disparity = all.filter {
+            let t = CMFormatDescriptionGetMediaSubType($0.formatDescription)
+            return t == kCVPixelFormatType_DisparityFloat32 || t == kCVPixelFormatType_DisparityFloat16
+        }
+        if let df = (disparity.isEmpty ? all : disparity).max(by: {
+            CMVideoFormatDescriptionGetDimensions($0.formatDescription).width <
+            CMVideoFormatDescriptionGetDimensions($1.formatDescription).width }) {
+            d.activeDepthDataFormat = df
+        }
+        if let md = best.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
+            output.maxPhotoDimensions = md
+        }
+        output.isDepthDataDeliveryEnabled = output.isDepthDataDeliverySupported
+        return output.isDepthDataDeliveryEnabled
     }
 
     private func reselect() { if let d = current { select(d, zoom: zoom) } }

@@ -1,5 +1,9 @@
 # Lens changelog
 
+## 1.4
+- Removed the "60" label from the viewfinder (the 60 fps preview itself stays).
+- Portrait: Lens now picks a camera format that supports depth, sets its depth format and turns depth delivery on after the format change. Before, depth was switched on too early, so Portrait reported "Depth not available". If a lens still has no depth, the message now names the camera.
+
 ## 1.3
 - RAW: captures are now exposed 1 stop lower to protect highlights (DNG files were coming out too bright).
 - 60 fps viewfinder: smoother preview when the camera has a 4:3 full-resolution format that supports it (a "60" shows top-left when active). Portrait and RAW stay at 30 fps.

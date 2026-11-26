@@ -72,13 +72,8 @@ struct ContentView: View {
                 Spacer()
                 if m.busy && m.mode == .night { badge("Hold still…").padding(.bottom, 8) }
                 if m.waiting { badge("Hold steady… tap to cancel").padding(.bottom, 8) }
-                if m.mode == .portrait && !m.depthOK { badge("Depth not available").padding(.bottom, 8) }
+                if m.mode == .portrait && !m.depthOK { badge("No depth on \(m.current?.localizedName ?? "this lens")").padding(.bottom, 8) }
                 lensChips.padding(.bottom, 10)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if m.fps >= 60 {
-                Text("60").font(.system(size: 11, weight: .bold)).foregroundColor(accent).padding(8)
             }
         }
         .aspectRatio(3.0 / 4.0, contentMode: .fit)
