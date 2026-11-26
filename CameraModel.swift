@@ -47,6 +47,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var origBrightness: CGFloat = 0.5
     private var captureApple = false
     private let motion = CMMotionManager()
+    private let videoOut = AVCaptureVideoDataOutput()
+    private let depthOut = AVCaptureDepthDataOutput()
+    private var sync: AVCaptureDataOutputSynchronizer?
+    private let previewQueue = DispatchQueue(label: "lens.preview")
+    weak var liveLayer: CALayer?
+    @Published var portraitLive = false
+    @Published var showZoom = false
+    private var zoomToken = 0
     private var lastFocusNorm = CGPoint(x: 0.5, y: 0.5)
 
     var isFront: Bool { current?.position == .front }
@@ -69,10 +77,36 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func factor(_ d: AVCaptureDevice) -> Double {
         switch d.deviceType {
-        case .builtInUltraWideCamera: return 0.5
+        case .builtInUltraWideCamera, .builtInDualWideCamera: return 0.5
         case .builtInTelephotoCamera: return 2
         default: return 1
         }
+    }
+
+    var displayZoom: Double { Double(zoom) * (current.map { factor($0) } ?? 1) }
+    var zoomStops: [Double] {
+        backLenses.contains { $0.deviceType == .builtInUltraWideCamera } ? [0.5, 1, 2] : [1, 2]
+    }
+    func nearestStop(_ z: Double) -> Double {
+        zoomStops.min { abs(log(max(z, 0.01) / $0)) < abs(log(max(z, 0.01) / $1)) } ?? 1
+    }
+
+    func goZoom(_ stop: Double) {
+        guard !isFront else { setZoom(CGFloat(stop)); return }
+        let ultra = backLenses.first { $0.deviceType == .builtInUltraWideCamera }
+        let wide = backLenses.first { $0.deviceType == .builtInWideAngleCamera }
+        if stop < 1, let u = ultra {
+            if current?.uniqueID == u.uniqueID { setZoom(1) } else { select(u) }
+        } else if let w = wide {
+            if current?.uniqueID == w.uniqueID { setZoom(CGFloat(stop)) } else { select(w, zoom: CGFloat(stop)) }
+        }
+    }
+
+    private func flashZoom() {
+        showZoom = true
+        zoomToken += 1
+        let t = zoomToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if t == self.zoomToken { self.showZoom = false } }
     }
 
     private func selectBack() {
@@ -100,7 +134,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             if let input = try? AVCaptureDeviceInput(device: d), self.session.canAddInput(input) {
                 self.session.addInput(input)
             }
-            if self.session.outputs.isEmpty, self.session.canAddOutput(self.output) {
+            if !self.session.outputs.contains(self.output), self.session.canAddOutput(self.output) {
                 self.session.addOutput(self.output)
             }
             self.session.commitConfiguration()
@@ -116,6 +150,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             d.videoZoomFactor = min(max(z, d.minAvailableVideoZoomFactor), d.maxAvailableVideoZoomFactor)
             d.setExposureTargetBias(min(max(bias, d.minExposureTargetBias), d.maxExposureTargetBias))
             d.unlockForConfiguration()
+            self.configureLive(portrait && depthNow, front: d.position == .front)
             if !self.session.isRunning { self.session.startRunning() }
             DispatchQueue.main.async {
                 self.previewLayer?.session = self.session
@@ -151,14 +186,19 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let dim = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
             return !f.supportedDepthDataFormats.isEmpty && Int(dim.width) * 3 == Int(dim.height) * 4
         }
-        guard let best = cands.max(by: { still($0) < still($1) }) else { return false }
+        let full = cands.filter { still($0) >= 4000 }
+        guard let best = (full.isEmpty ? cands : full).min(by: {
+            CMVideoFormatDescriptionGetDimensions($0.formatDescription).width <
+            CMVideoFormatDescriptionGetDimensions($1.formatDescription).width }) else { return false }
         d.activeFormat = best
         let all = best.supportedDepthDataFormats
         let disparity = all.filter {
             let t = CMFormatDescriptionGetMediaSubType($0.formatDescription)
             return t == kCVPixelFormatType_DisparityFloat32 || t == kCVPixelFormatType_DisparityFloat16
         }
-        if let df = (disparity.isEmpty ? all : disparity).max(by: {
+        let pool = disparity.isEmpty ? all : disparity
+        let small = pool.filter { CMVideoFormatDescriptionGetDimensions($0.formatDescription).width <= 640 }
+        if let df = (small.isEmpty ? pool : small).max(by: {
             CMVideoFormatDescriptionGetDimensions($0.formatDescription).width <
             CMVideoFormatDescriptionGetDimensions($1.formatDescription).width }) {
             d.activeDepthDataFormat = df
@@ -168,6 +208,36 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         output.isDepthDataDeliveryEnabled = output.isDepthDataDeliverySupported
         return output.isDepthDataDeliveryEnabled
+    }
+
+    // Portrait live preview: video + depth frames, blurred in real time
+    private func configureLive(_ on: Bool, front: Bool) {
+        session.beginConfiguration()
+        sync = nil
+        if session.outputs.contains(videoOut) { session.removeOutput(videoOut) }
+        if session.outputs.contains(depthOut) { session.removeOutput(depthOut) }
+        var ok = false
+        if on {
+            videoOut.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+            videoOut.alwaysDiscardsLateVideoFrames = true
+            depthOut.isFilteringEnabled = true
+            depthOut.alwaysDiscardsLateDepthData = true
+            if session.canAddOutput(videoOut) { session.addOutput(videoOut) }
+            if session.canAddOutput(depthOut) { session.addOutput(depthOut) }
+            for c in [videoOut.connection(with: .video), depthOut.connection(with: .depthData)] {
+                guard let c = c else { continue }
+                if c.isVideoOrientationSupported { c.videoOrientation = .portrait }
+                if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = front }
+            }
+            ok = session.outputs.contains(videoOut) && session.outputs.contains(depthOut)
+        }
+        session.commitConfiguration()
+        if ok {
+            let s = AVCaptureDataOutputSynchronizer(dataOutputs: [videoOut, depthOut])
+            s.setDelegate(self, queue: previewQueue)
+            sync = s
+        }
+        DispatchQueue.main.async { self.portraitLive = ok }
     }
 
     private func reselect() { if let d = current { select(d, zoom: zoom) } }
@@ -201,7 +271,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             try? d.lockForConfiguration()
             d.videoZoomFactor = v
             d.unlockForConfiguration()
-            DispatchQueue.main.async { self.zoom = v }
+            DispatchQueue.main.async { self.zoom = v; self.flashZoom() }
         }
     }
 
@@ -272,6 +342,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     s.photoQualityPrioritization = .speed
                     if m == .photo, !screen, self.output.supportedFlashModes.contains(fl) { s.flashMode = fl }
                 }
+                self.quiet(s)
+                Sounds.shared.shutter()
                 self.output.capturePhoto(with: s, delegate: self)
             }
         }
@@ -360,35 +432,35 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 .transformed(by: CGAffineTransform(translationX: i.extent.width, y: 0))
     }
 
-    // MARK: Portrait (Apple's native depth blur)
+    // MARK: Portrait (depth-mask background blur, same code as the live preview)
 
     private func portrait(_ photo: AVCapturePhoto) {
         guard let data = photo.fileDataRepresentation(),
               let base = CIImage(data: data, options: [.applyOrientationProperty: true]) else { fail(); return }
         savePNG(mirror(base), thumbnail: false)   // keep the original
-        guard let disp = CIImage(data: data, options: [.auxiliaryDisparity: true, .applyOrientationProperty: true]),
-              let f = CIFilter(name: "CIDepthBlurEffect") else {
+        guard let dd = photo.depthData else {
             DispatchQueue.main.async { self.note("No depth data") }
             return
         }
-        let e = base.extent
-        let s = e.width * 0.2
-        let fx = lastFocusNorm.x * e.width, fy = (1 - lastFocusNorm.y) * e.height
-        f.setValue(base, forKey: kCIInputImageKey)
-        f.setValue(disp, forKey: "inputDisparityImage")
-        f.setValue(aperture, forKey: "inputAperture")
-        f.setValue(CIVector(x: fx - s / 2, y: fy - s / 2, z: s, w: s), forKey: "inputFocusRect")
-        if let out = f.outputImage {
-            savePNG(mirror(out.cropped(to: e)))
-        } else {
-            DispatchQueue.main.async { self.note("Blur failed") }
-        }
+        let o = CGImagePropertyOrientation(rawValue: UInt32(orient(photo))) ?? .right
+        let map = dd.applyingExifOrientation(o)
+            .converting(toDepthDataType: kCVPixelFormatType_DisparityFloat32).depthDataMap
+        savePNG(mirror(portraitBlur(base, map, focus: lastFocusNorm)))
+    }
+
+    // Silence the system shutter where iOS allows it (looked up at runtime so older SDKs still build)
+    private func quiet(_ s: AVCapturePhotoSettings) {
+        guard output.responds(to: NSSelectorFromString("isShutterSoundSuppressionSupported")),
+              (output.value(forKey: "shutterSoundSuppressionSupported") as? Bool) == true,
+              s.responds(to: NSSelectorFromString("setShutterSoundSuppressionEnabled:")) else { return }
+        s.setValue(true, forKey: "shutterSoundSuppressionEnabled")
     }
 
     // MARK: Night (multi-frame align + average + tone map)
 
     private func startNight() {
         busy = true; progress = 0
+        Sounds.shared.nightStart()
         proc.async {
             self.nightAcc = nil; self.nightRef = nil; self.nightCount = 0
             self.nightGrab()
@@ -399,6 +471,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async {
             let s = AVCapturePhotoSettings(format: self.bgra)
             s.photoQualityPrioritization = .speed
+            self.quiet(s)
             self.output.capturePhoto(with: s, delegate: self)
         }
     }
@@ -431,6 +504,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     private func nightFinish() {
+        Sounds.shared.nightEnd()
         defer { DispatchQueue.main.async { self.busy = false; self.progress = 0 } }
         guard let acc = nightAcc, let ref = nightRef else { return }
         let r = ref.extent.insetBy(dx: ref.extent.width * 0.015, dy: ref.extent.height * 0.015)
@@ -485,5 +559,141 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 DispatchQueue.main.async { self.note(ok ? "Saved" : "Save failed") }
             }
         }
+    }
+}
+
+// MARK: Portrait blur + live preview
+
+extension CameraModel: AVCaptureDataOutputSynchronizerDelegate {
+    func dataOutputSynchronizer(_ synchronizer: AVCaptureDataOutputSynchronizer,
+                                didOutput collection: AVCaptureSynchronizedDataCollection) {
+        guard let v = collection.synchronizedData(for: videoOut) as? AVCaptureSynchronizedSampleBufferData,
+              !v.sampleBufferWasDropped,
+              let pb = CMSampleBufferGetImageBuffer(v.sampleBuffer) else { return }
+        var img = CIImage(cvPixelBuffer: pb)
+        let s = 960.0 / img.extent.width
+        img = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
+        if let d = collection.synchronizedData(for: depthOut) as? AVCaptureSynchronizedDepthData, !d.depthDataWasDropped {
+            let map = d.depthData.converting(toDepthDataType: kCVPixelFormatType_DisparityFloat32).depthDataMap
+            img = portraitBlur(img, map, focus: lastFocusNorm)
+        }
+        guard let cg = ctx.createCGImage(img, from: img.extent) else { return }
+        DispatchQueue.main.async { self.liveLayer?.contents = cg }
+    }
+
+    // Mask: 0 where depth matches the focus point (sharp), 1 where it differs (blurred)
+    fileprivate func blurMask(_ map: CVPixelBuffer, focus: CGPoint) -> (CIImage, CGSize)? {
+        CVPixelBufferLockBaseAddress(map, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
+        let w = CVPixelBufferGetWidth(map), h = CVPixelBufferGetHeight(map)
+        guard w > 1, h > 1, let base = CVPixelBufferGetBaseAddress(map) else { return nil }
+        let bpr = CVPixelBufferGetBytesPerRow(map)
+        func px(_ x: Int, _ y: Int) -> Float { base.advanced(by: y * bpr).assumingMemoryBound(to: Float32.self)[x] }
+
+        let cx = Int(focus.x * CGFloat(w)), cy = Int(focus.y * CGFloat(h))
+        var win: [Float] = []
+        for dy in -4...4 {
+            for dx in -4...4 {
+                let v = px(min(max(cx + dx, 0), w - 1), min(max(cy + dy, 0), h - 1))
+                if v.isFinite && v > 0 { win.append(v) }
+            }
+        }
+        guard !win.isEmpty else { return nil }
+        win.sort()
+        let fd = win[win.count / 2]
+
+        var rgba = [UInt8](repeating: 255, count: w * h * 4)
+        for y in 0..<h {
+            for x in 0..<w {
+                let v = px(x, y)
+                var m: Float = 0
+                if v.isFinite {                       // 0 disparity = infinitely far = fully blurred
+                    let rel = abs(v - fd) / max(fd, 0.15)
+                    m = min(max((rel - 0.10) / 0.45, 0), 1)
+                }
+                let b = UInt8(m * 255), i = (y * w + x) * 4
+                rgba[i] = b; rgba[i + 1] = b; rgba[i + 2] = b
+            }
+        }
+        let ci = CIImage(bitmapData: Data(rgba), bytesPerRow: w * 4, size: CGSize(width: w, height: h),
+                         format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+        return (ci, CGSize(width: w, height: h))
+    }
+
+    fileprivate func portraitBlur(_ img: CIImage, _ map: CVPixelBuffer, focus: CGPoint) -> CIImage {
+        guard let (mask, ms) = blurMask(map, focus: focus) else { return img }
+        let e = img.extent
+        let up = mask.transformed(by: CGAffineTransform(scaleX: e.width / ms.width, y: e.height / ms.height))
+        let feather = CIFilter.gaussianBlur()
+        feather.inputImage = up.clampedToExtent()
+        feather.radius = Float(e.width * 0.004)
+        let soft = (feather.outputImage ?? up).cropped(to: e)
+        let vb = CIFilter.maskedVariableBlur()
+        vb.inputImage = img.clampedToExtent()
+        vb.mask = soft
+        vb.radius = Float(e.width * 0.014)
+        return (vb.outputImage ?? img).cropped(to: e)
+    }
+}
+
+// MARK: Sounds (generated in code: soft modern shutter, calm pad + chime for Low Light)
+
+final class Sounds {
+    static let shared = Sounds()
+    private var click: AVAudioPlayer?
+    private var pad: AVAudioPlayer?
+    private var chime: AVAudioPlayer?
+    private let sr = 44100.0
+
+    private init() {
+        let s = AVAudioSession.sharedInstance()
+        try? s.setCategory(.ambient, options: [.mixWithOthers])   // follows the silent switch like the stock camera
+        try? s.setActive(true)
+        click = make(0.16) { t in
+            let a = sin(2 * .pi * 1900 * t) * exp(-t * 75) * 0.30
+            let b = sin(2 * .pi * 260 * t) * exp(-t * 38) * 0.45
+            let n = Double.random(in: -1...1) * exp(-t * 260) * 0.15
+            return a + b + n
+        }
+        pad = make(6.0) { t in
+            var v = 0.0
+            for (i, f) in [220.0, 277.18, 329.63, 440.0].enumerated() {
+                v += sin(2 * .pi * f * t + Double(i)) * 0.07 + sin(2 * .pi * f * 1.004 * t) * 0.04
+            }
+            let swell = 0.75 + 0.25 * sin(2 * .pi * 0.35 * t)
+            return v * swell * min(t / 0.9, 1) * min((6.0 - t) / 0.5, 1)
+        }
+        chime = make(1.4) { t in
+            let e = min(t / 0.006, 1)
+            return e * (sin(2 * .pi * 880 * t) * exp(-t * 3.2) * 0.28
+                      + sin(2 * .pi * 1320 * t) * exp(-t * 4.5) * 0.16
+                      + sin(2 * .pi * 1760 * t) * exp(-t * 7) * 0.08)
+        }
+    }
+
+    private func make(_ dur: Double, _ f: (Double) -> Double) -> AVAudioPlayer? {
+        let n = Int(dur * sr)
+        var d = Data()
+        func le32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func le16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
+        d.append("RIFF".data(using: .ascii)!); le32(UInt32(36 + n * 2)); d.append("WAVE".data(using: .ascii)!)
+        d.append("fmt ".data(using: .ascii)!); le32(16); le16(1); le16(1)
+        le32(UInt32(sr)); le32(UInt32(sr) * 2); le16(2); le16(16)
+        d.append("data".data(using: .ascii)!); le32(UInt32(n * 2))
+        for i in 0..<n {
+            let v = max(-1, min(1, f(Double(i) / sr)))
+            le16(UInt16(bitPattern: Int16(v * 32000)))
+        }
+        let p = try? AVAudioPlayer(data: d)
+        p?.prepareToPlay()
+        return p
+    }
+
+    func shutter() { click?.currentTime = 0; click?.play() }
+    func nightStart() { pad?.stop(); pad?.currentTime = 0; pad?.volume = 0.9; pad?.play() }
+    func nightEnd() {
+        pad?.setVolume(0, fadeDuration: 0.5)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { self.pad?.stop() }
+        chime?.currentTime = 0; chime?.play()
     }
 }

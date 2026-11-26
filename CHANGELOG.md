@@ -1,5 +1,13 @@
 # Lens changelog
 
+## 1.6
+- Portrait: the blur was landing on the subject. Portrait now builds its own depth mask (sharp at the depth you tap, blurred everywhere else, including far backgrounds) instead of Apple's blur filter, whose focus-area setting was almost certainly the cause. Tap the subject to choose what stays sharp.
+- Portrait: real-time blur in the viewfinder, using the same depth mask as the saved photo.
+- Removed the circle background behind the last-photo thumbnail and the camera-switch button.
+- Sounds: the system shutter is silenced where iOS allows it and replaced by a soft modern click. Low Light plays a calm ambient pad while it captures, then a gentle chime, instead of one click per frame. Sounds follow the silent switch.
+- Zoom: added a 2x stop (0.5 / 1 / 2). The selected stop shows the exact zoom (for example 1.7x), and a zoom badge appears while pinching.
+- Volume buttons (and Camera Control on supported phones) now take the photo in every mode.
+
 ## 1.5
 - APPLE mode no longer uses the 60 fps camera format. That format can disable Deep Fusion / full Smart HDR, which is likely why APPLE shots looked weaker than the stock camera. With APPLE on, the viewfinder runs at 30 fps on the standard photo format.
 
