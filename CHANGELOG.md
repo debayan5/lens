@@ -1,5 +1,8 @@
 # Lens changelog
 
+## 1.6.4
+- Diagnostic: on first launch Lens shows a one-time sheet listing every front camera format that reaches 60 fps (size, aspect ratio, still size) and whether Lens can use 60 fps on the front camera. You can select and copy the text. It doesn't change how the camera works.
+
 ## 1.6.3 (hotfix)
 - PNG photos were saving at about 2 MP. The 60 fps camera format defaults to a small still size, so Lens now asks for the largest still size the format supports (12 MP on the iPhone 13) for every capture: Photo, Portrait, Apple and each Low Light frame. RAW and Apple were already 12 MP.
 - Low Light now processes 12 MP frames, so it takes a little longer to finish.

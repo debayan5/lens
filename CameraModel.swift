@@ -55,6 +55,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published var portraitLive = false
     @Published var showZoom = false
     private var zoomToken = 0
+    @Published var report: String?
     private var volObs: NSKeyValueObservation?
     private var lastButton = Date.distantPast
     private var blurFactor = 0.017
@@ -67,6 +68,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func start() {
         watchVolume()
+        if !UserDefaults.standard.bool(forKey: "frontFormatReportShown") { report = frontFormatReport() }
         AVCaptureDevice.requestAccess(for: .video) { ok in
             guard ok else { return }
             let found = AVCaptureDevice.DiscoverySession(
@@ -268,6 +270,39 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func cycleFlash() {
         flash = flash == .off ? .auto : (flash == .auto ? .on : .off)
+    }
+
+    // MARK: One-time front camera format report
+
+    private func frontFormatReport() -> String {
+        guard let f = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
+            return "No front camera found."
+        }
+        var rows: [String] = []
+        var usable = false
+        for fmt in f.formats {
+            let fps = fmt.videoSupportedFrameRateRanges.map { $0.maxFrameRate }.max() ?? 0
+            guard fps >= 60 else { continue }
+            let d = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+            let is43 = Int(d.width) * 3 == Int(d.height) * 4
+            let is169 = Int(d.width) * 9 == Int(d.height) * 16
+            let ratio = is43 ? "4:3" : (is169 ? "16:9" : "other")
+            let still = fmt.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width })
+            let stillText = still.map { "\($0.width)x\($0.height)" } ?? "?"
+            if is43 && d.width >= 1440 && (still?.width ?? 0) >= 4000 { usable = true }
+            let row = "\(d.width)x\(d.height)  \(ratio)  \(Int(fps)) fps  stills \(stillText)"
+            if !rows.contains(row) { rows.append(row) }
+        }
+        var out = "Formats that reach 60 fps (\(f.formats.count) formats in total):\n\n"
+        out += rows.isEmpty ? "none\n" : rows.joined(separator: "\n") + "\n"
+        out += "\nLens would use 60 fps on the front camera: " + (usable ? "YES" : "NO")
+        out += usable ? "" : "\n(no 4:3 format with 12 MP stills at 60 fps)"
+        return out
+    }
+
+    func dismissReport() {
+        report = nil
+        UserDefaults.standard.set(true, forKey: "frontFormatReportShown")
     }
 
     // MARK: Hardware buttons

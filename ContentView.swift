@@ -76,6 +76,7 @@ struct ContentView: View {
             m.announce("Lens " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""))
         }
         .statusBarHidden()
+        .sheet(isPresented: Binding(get: { m.report != nil }, set: { if !$0 { m.dismissReport() } })) { reportSheet }
     }
 
     // MARK: Viewfinder
@@ -182,6 +183,22 @@ struct ContentView: View {
                 .padding(.horizontal, 11).padding(.vertical, 6)
                 .background(Capsule().fill(on ? accent : Color.white.opacity(0.18)))
         }
+    }
+
+    var reportSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Front camera formats").font(.headline)
+            ScrollView {
+                Text(m.report ?? "")
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            Button("Close") { m.dismissReport() }
+                .font(.headline).frame(maxWidth: .infinity)
+        }
+        .padding(20)
+        .presentationDetents([.medium, .large])
     }
 
     var blurSlider: some View {
