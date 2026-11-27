@@ -1,5 +1,9 @@
 # Lens changelog
 
+## 1.6.3 (hotfix)
+- PNG photos were saving at about 2 MP. The 60 fps camera format defaults to a small still size, so Lens now asks for the largest still size the format supports (12 MP on the iPhone 13) for every capture: Photo, Portrait, Apple and each Low Light frame. RAW and Apple were already 12 MP.
+- Low Light now processes 12 MP frames, so it takes a little longer to finish.
+
 ## 1.6.1 (hotfix)
 - The big circles behind the last-photo thumbnail and the camera-switch button were iOS adding its own button background, not Lens. All buttons now use a flat style, so the circles are gone.
 - Volume buttons: the button handler now goes through one debounced path, and a fallback watches the volume level in case the system doesn't deliver button events. Pressing either volume button should take the photo in every mode.

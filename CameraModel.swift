@@ -148,6 +148,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             try? d.lockForConfiguration()
             let fpsNow = fast ? self.use60(d) : 30
             let depthNow = portrait ? self.useDepth(d) : false
+            if let md = d.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
+                self.output.maxPhotoDimensions = md
+            }
             if d.activeFormat.isVideoHDRSupported {
                 d.automaticallyAdjustsVideoHDREnabled = false
                 d.isVideoHDREnabled = false
@@ -362,12 +365,19 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 } else if raw, let r = self.output.availableRawPhotoPixelFormatTypes
                     .first(where: { !AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) {
                     s = AVCapturePhotoSettings(rawPixelFormatType: r)
+                    // Embed a full-size preview so Photos reports the real resolution, not the tiny default thumbnail
+                    let md = self.device?.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width })
+                    s.previewPhotoFormat = [
+                        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                        kCVPixelBufferWidthKey as String: Int(md?.width ?? 4032),
+                        kCVPixelBufferHeightKey as String: Int(md?.height ?? 3024)]
                 } else {
                     s = AVCapturePhotoSettings(format: self.bgra)
                     s.photoQualityPrioritization = .speed
                     if m == .photo, !screen, self.output.supportedFlashModes.contains(fl) { s.flashMode = fl }
                 }
                 self.quiet(s)
+                self.full(s)
                 Sounds.shared.shutter()
                 self.output.capturePhoto(with: s, delegate: self)
             }
@@ -473,6 +483,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         savePNG(mirror(portraitBlur(base, map, focus: lastFocusNorm)))
     }
 
+    // Ask for the largest still size the active format supports (otherwise 60 fps formats default to ~2 MP)
+    private func full(_ s: AVCapturePhotoSettings) {
+        let md = output.maxPhotoDimensions
+        if md.width > 0 && md.height > 0 { s.maxPhotoDimensions = md }
+    }
+
     // Silence the system shutter where iOS allows it (looked up at runtime so older SDKs still build)
     private func quiet(_ s: AVCapturePhotoSettings) {
         guard output.responds(to: NSSelectorFromString("isShutterSoundSuppressionSupported")),
@@ -497,6 +513,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let s = AVCapturePhotoSettings(format: self.bgra)
             s.photoQualityPrioritization = .speed
             self.quiet(s)
+            self.full(s)
             self.output.capturePhoto(with: s, delegate: self)
         }
     }
