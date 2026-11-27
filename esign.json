@@ -2,38 +2,20 @@
   "name": "Lens",
   "identifier": "com.debayan.lens.source",
   "subtitle": "Lens camera builds",
-  "description": "Builds of the Lens camera app.",
   "iconURL": "https://raw.githubusercontent.com/debayan5/lens/main/icon.png",
-  "website": "https://github.com/debayan5/lens",
-  "tintColor": "FFCC00",
-  "sourceURL": "https://raw.githubusercontent.com/debayan5/lens/main/source.json",
   "apps": [
     {
       "name": "Lens",
       "bundleIdentifier": "com.debayan.lens",
       "developerName": "Debayan",
       "subtitle": "Native iPhone camera",
-      "localizedDescription": "Native iPhone camera with PNG and RAW capture, Portrait and Low Light modes.",
-      "iconURL": "https://raw.githubusercontent.com/debayan5/lens/main/icon.png",
-      "tintColor": "FFCC00",
-      "beta": false,
-      "screenshotURLs": [],
       "version": "1.6.4",
       "versionDate": "2026-11-27",
-      "versionDescription": "- Diagnostic: on first launch Lens shows a one-time sheet listing every front camera format that reaches 60 fps (size, aspect ratio, still size) and whether Lens can use 60 fps on the front camera. You can select and copy the text. It doesn't change how the camera works.",
       "size": 684369,
       "downloadURL": "https://github.com/debayan5/lens/releases/download/v1.6.4/Lens.ipa",
-      "versions": [
-        {
-          "version": "1.6.4",
-          "date": "2026-11-27",
-          "size": 684369,
-          "downloadURL": "https://github.com/debayan5/lens/releases/download/v1.6.4/Lens.ipa",
-          "localizedDescription": "- Diagnostic: on first launch Lens shows a one-time sheet listing every front camera format that reaches 60 fps (size, aspect ratio, still size) and whether Lens can use 60 fps on the front camera. You can select and copy the text. It doesn't change how the camera works.",
-          "minOSVersion": "16.0"
-        }
-      ]
+      "localizedDescription": "Native iPhone camera with PNG and RAW capture, Portrait and Low Light modes.",
+      "versionDescription": "- Diagnostic: on first launch Lens shows a one-time sheet listing every front camera format that reaches 60 fps (size, aspect ratio, still size) and whether Lens can use 60 fps on the front camera. You can select and copy the text. It doesn't change how the camera works.",
+      "iconURL": "https://raw.githubusercontent.com/debayan5/lens/main/icon.png"
     }
-  ],
-  "news": []
+  ]
 }
