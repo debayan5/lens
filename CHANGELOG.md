@@ -1,5 +1,8 @@
 # Lens changelog
 
+## 1.6.5
+- Front camera now gets the 60 fps viewfinder. The format report showed a 1024x768 4:3 format at 60 fps with full 12 MP stills; Lens had been skipping it because it only accepted formats at least 1440 px wide. The minimum is now 1024 px. The front preview is slightly lower resolution than the rear one; photos are still 12 MP.
+
 ## 1.6.4
 - Diagnostic: on first launch Lens shows a one-time sheet listing every front camera format that reaches 60 fps (size, aspect ratio, still size) and whether Lens can use 60 fps on the front camera. You can select and copy the text. It doesn't change how the camera works.
 

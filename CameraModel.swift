@@ -173,7 +173,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private func use60(_ d: AVCaptureDevice) -> Int {
         let cands = d.formats.filter { f in
             let dim = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
-            return Int(dim.width) * 3 == Int(dim.height) * 4 && dim.width >= 1440
+            return Int(dim.width) * 3 == Int(dim.height) * 4 && dim.width >= 1024
                 && f.videoSupportedFrameRateRanges.contains { $0.maxFrameRate >= 60 }
                 && f.supportedMaxPhotoDimensions.contains { $0.width >= 4000 }   // keep full-res stills
         }
@@ -289,7 +289,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let ratio = is43 ? "4:3" : (is169 ? "16:9" : "other")
             let still = fmt.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width })
             let stillText = still.map { "\($0.width)x\($0.height)" } ?? "?"
-            if is43 && d.width >= 1440 && (still?.width ?? 0) >= 4000 { usable = true }
+            if is43 && d.width >= 1024 && (still?.width ?? 0) >= 4000 { usable = true }
             let row = "\(d.width)x\(d.height)  \(ratio)  \(Int(fps)) fps  stills \(stillText)"
             if !rows.contains(row) { rows.append(row) }
         }
