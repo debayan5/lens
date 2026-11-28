@@ -55,7 +55,6 @@ struct ContentView: View {
     @State private var pinching = false
     @State private var flipAngle = 0.0
     @State private var flipCover = 0.0
-    @State private var iconSpin = 0.0
     private let accent = Color(red: 1.0, green: 0.8, blue: 0.0)
 
     var body: some View {
@@ -64,11 +63,6 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 topBar.frame(height: 56)
                 viewfinder
-                    .rotation3DEffect(.degrees(flipAngle), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(.regularMaterial).opacity(flipCover).allowsHitTesting(false)
-                    }
                 Spacer(minLength: 0)
                 if m.mode == .portrait { blurSlider.padding(.horizontal, 28).padding(.bottom, 12) }
                 modeSelector.padding(.bottom, 16)
@@ -89,6 +83,7 @@ struct ContentView: View {
     var viewfinder: some View {
         ZStack {
             Preview(model: m)
+                .rotation3DEffect(.degrees(flipAngle), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
                 .onTapGesture(count: 2) { animatedFlip() }
                 .onTapGesture { m.focus(at: $0) }
                 .gesture(MagnificationGesture()
@@ -98,6 +93,7 @@ struct ContentView: View {
                     }
                     .onEnded { _ in pinching = false })
 
+            Rectangle().fill(.regularMaterial).opacity(flipCover).allowsHitTesting(false)
             if let p = m.focusPoint {
                 Rectangle().stroke(accent, lineWidth: 1.5)
                     .frame(width: 74, height: 74).position(p).allowsHitTesting(false)
@@ -118,6 +114,7 @@ struct ContentView: View {
                 lensChips.padding(.bottom, 10)
             }
         }
+        .background(Color.black)
         .aspectRatio(3.0 / 4.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -243,7 +240,7 @@ struct ContentView: View {
     func animatedFlip() {
         guard !m.busy, m.countdown == 0 else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.easeIn(duration: 0.2)) { flipAngle = 90; flipCover = 1; iconSpin += 180 }
+        withAnimation(.easeIn(duration: 0.2)) { flipAngle = 90; flipCover = 1 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             m.flip()
             flipAngle = -90
@@ -307,7 +304,6 @@ struct ContentView: View {
                 Image(systemName: "camera.rotate.fill")
                     .font(.system(size: 28)).foregroundColor(.white)
                     .frame(width: 54, height: 54)
-                    .rotationEffect(.degrees(iconSpin))
             }
         }
         .padding(.horizontal, 28)

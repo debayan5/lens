@@ -541,15 +541,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private func portrait(_ photo: AVCapturePhoto) {
         guard let data = photo.fileDataRepresentation(),
               let base = CIImage(data: data, options: [.applyOrientationProperty: true]) else { fail(); return }
-        savePNG(mirror(base), thumbnail: false)   // keep the original
         guard let dd = photo.depthData else {
-            DispatchQueue.main.async { self.note("No depth data") }
+            // no depth available: still keep the shot, saved once without blur
+            savePNG(mirror(base))
+            DispatchQueue.main.async { self.note("No depth data, saved without blur") }
             return
         }
         let o = CGImagePropertyOrientation(rawValue: UInt32(orient(photo))) ?? .right
         let map = dd.applyingExifOrientation(o)
             .converting(toDepthDataType: kCVPixelFormatType_DisparityFloat32).depthDataMap
-        savePNG(mirror(portraitBlur(base, map, focus: lastFocusNorm)))
+        savePNG(mirror(portraitBlur(base, map, focus: lastFocusNorm)))   // only the blurred photo is saved
     }
 
     // Ask for the largest still size the active format supports (otherwise 60 fps formats default to ~2 MP)

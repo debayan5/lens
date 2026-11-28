@@ -2,6 +2,15 @@
   "app": "Lens",
   "versions": [
     {
+      "version": "1.7.1",
+      "date": "2026-11-28",
+      "changes": [
+        "Fixed: the camera-switch flip now stays inside the viewfinder frame. It no longer spills over the top bar and the controls below.",
+        "Reverted: the camera-switch button no longer spins.",
+        "Fixed: Portrait now saves only the blurred photo instead of two. If no depth data is available, it saves one normal photo and says so."
+      ]
+    },
+    {
       "version": "1.7.0",
       "date": "2026-11-27",
       "changes": [
