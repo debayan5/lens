@@ -18,18 +18,18 @@
       "tintColor": "FFCC00",
       "beta": false,
       "screenshotURLs": [],
-      "version": "1.7.0",
+      "version": "1.7.1",
       "versionDate": "2026-11-28",
-      "versionDescription": "- New: a What's new popup appears the first time you open the app after installing or updating. Its arrow opens the full changelog (changelog.json).\n- New: self-timer button in the top bar. Tap once for 3 s, twice for 5 s, three times for 10 s, a fourth time for off. Tap the shutter during the countdown to cancel.\n- New: smooth flip animation when you switch cameras.\n- Fixed: front camera photos taken with APPLE on are now saved mirrored when Mirror is on.\n- Changed: Low Light sound is now a soft tick at the start and a quick double tick when finished, instead of the long ambient tone.\n- Changed: builds no longer run on every push. Start one yourself from the Actions tab with Run workflow.\n- Changed: the changelog is now changelog.json (bundled in the app). The unused esign.json source file is removed; source.json is the only source file.",
-      "size": 704358,
-      "downloadURL": "https://github.com/debayan5/lens/releases/download/v1.7.0/Lens.ipa",
+      "versionDescription": "- Fixed: the camera-switch flip now stays inside the viewfinder frame. It no longer spills over the top bar and the controls below.\n- Reverted: the camera-switch button no longer spins.\n- Fixed: Portrait now saves only the blurred photo instead of two. If no depth data is available, it saves one normal photo and says so.",
+      "size": 703758,
+      "downloadURL": "https://github.com/debayan5/lens/releases/download/v1.7.1/Lens.ipa",
       "versions": [
         {
-          "version": "1.7.0",
+          "version": "1.7.1",
           "date": "2026-11-28",
-          "size": 704358,
-          "downloadURL": "https://github.com/debayan5/lens/releases/download/v1.7.0/Lens.ipa",
-          "localizedDescription": "- New: a What's new popup appears the first time you open the app after installing or updating. Its arrow opens the full changelog (changelog.json).\n- New: self-timer button in the top bar. Tap once for 3 s, twice for 5 s, three times for 10 s, a fourth time for off. Tap the shutter during the countdown to cancel.\n- New: smooth flip animation when you switch cameras.\n- Fixed: front camera photos taken with APPLE on are now saved mirrored when Mirror is on.\n- Changed: Low Light sound is now a soft tick at the start and a quick double tick when finished, instead of the long ambient tone.\n- Changed: builds no longer run on every push. Start one yourself from the Actions tab with Run workflow.\n- Changed: the changelog is now changelog.json (bundled in the app). The unused esign.json source file is removed; source.json is the only source file.",
+          "size": 703758,
+          "downloadURL": "https://github.com/debayan5/lens/releases/download/v1.7.1/Lens.ipa",
+          "localizedDescription": "- Fixed: the camera-switch flip now stays inside the viewfinder frame. It no longer spills over the top bar and the controls below.\n- Reverted: the camera-switch button no longer spins.\n- Fixed: Portrait now saves only the blurred photo instead of two. If no depth data is available, it saves one normal photo and says so.",
           "minOSVersion": "16.0"
         }
       ]
