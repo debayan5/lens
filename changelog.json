@@ -1,0 +1,109 @@
+{
+  "app": "Lens",
+  "versions": [
+    {
+      "version": "1.7.0",
+      "date": "2026-11-27",
+      "changes": [
+        "New: a What's new popup appears the first time you open the app after installing or updating. Its arrow opens the full changelog (changelog.json).",
+        "New: self-timer button in the top bar. Tap once for 3 s, twice for 5 s, three times for 10 s, a fourth time for off. Tap the shutter during the countdown to cancel.",
+        "New: smooth flip animation when you switch cameras.",
+        "Fixed: front camera photos taken with APPLE on are now saved mirrored when Mirror is on.",
+        "Changed: Low Light sound is now a soft tick at the start and a quick double tick when finished, instead of the long ambient tone.",
+        "Changed: builds no longer run on every push. Start one yourself from the Actions tab with Run workflow.",
+        "Changed: the changelog is now changelog.json (bundled in the app). The unused esign.json source file is removed; source.json is the only source file."
+      ]
+    },
+    {
+      "version": "1.6.5",
+      "changes": [
+        "Front camera now gets the 60 fps viewfinder. The format report showed a 1024x768 4:3 format at 60 fps with full 12 MP stills; Lens had been skipping it because it only accepted formats at least 1440 px wide. The minimum is now 1024 px. The front preview is slightly lower resolution than the rear one; photos are still 12 MP."
+      ]
+    },
+    {
+      "version": "1.6.4",
+      "changes": [
+        "Diagnostic: on first launch Lens shows a one-time sheet listing every front camera format that reaches 60 fps (size, aspect ratio, still size) and whether Lens can use 60 fps on the front camera. You can select and copy the text. It doesn't change how the camera works."
+      ]
+    },
+    {
+      "version": "1.6.3",
+      "changes": [
+        "PNG photos were saving at about 2 MP. The 60 fps camera format defaults to a small still size, so Lens now asks for the largest still size the format supports (12 MP on the iPhone 13) for every capture: Photo, Portrait, Apple and each Low Light frame. RAW and Apple were already 12 MP.",
+        "Low Light now processes 12 MP frames, so it takes a little longer to finish."
+      ]
+    },
+    {
+      "version": "1.6.2",
+      "changes": [
+        "RAW: DNG files now embed a full-size preview, so Photos reports the real resolution instead of the tiny default thumbnail."
+      ]
+    },
+    {
+      "version": "1.6.1",
+      "changes": [
+        "The big circles behind the last-photo thumbnail and the camera-switch button were iOS adding its own button background, not Lens. All buttons now use a flat style, so the circles are gone.",
+        "Volume buttons: the button handler now goes through one debounced path, and a fallback watches the volume level in case the system doesn't deliver button events. Pressing either volume button should take the photo in every mode.",
+        "Portrait: new LOW to HIGH slider under the viewfinder controls how strong the background blur is. It changes the live preview immediately and is used for the saved photo.",
+        "A small \"Lens 1.6.1\" toast shows when the app opens, so you can confirm which build is installed. Zoom stops (0.5 / 1 / 2), the exact zoom readout and the pinch badge from 1.6 are unchanged; if you don't see them, the new build isn't installed yet."
+      ]
+    },
+    {
+      "version": "1.6",
+      "changes": [
+        "Portrait: the blur was landing on the subject. Portrait now builds its own depth mask (sharp at the depth you tap, blurred everywhere else, including far backgrounds) instead of Apple's blur filter, whose focus-area setting was almost certainly the cause. Tap the subject to choose what stays sharp.",
+        "Portrait: real-time blur in the viewfinder, using the same depth mask as the saved photo.",
+        "Removed the circle background behind the last-photo thumbnail and the camera-switch button.",
+        "Sounds: the system shutter is silenced where iOS allows it and replaced by a soft modern click. Low Light plays a calm ambient pad while it captures, then a gentle chime, instead of one click per frame. Sounds follow the silent switch.",
+        "Zoom: added a 2x stop (0.5 / 1 / 2). The selected stop shows the exact zoom (for example 1.7x), and a zoom badge appears while pinching.",
+        "Volume buttons (and Camera Control on supported phones) now take the photo in every mode."
+      ]
+    },
+    {
+      "version": "1.5",
+      "changes": [
+        "APPLE mode no longer uses the 60 fps camera format. That format can disable Deep Fusion / full Smart HDR, which is likely why APPLE shots looked weaker than the stock camera. With APPLE on, the viewfinder runs at 30 fps on the standard photo format."
+      ]
+    },
+    {
+      "version": "1.4",
+      "changes": [
+        "Removed the \"60\" label from the viewfinder (the 60 fps preview itself stays).",
+        "Portrait: Lens now picks a camera format that supports depth, sets its depth format and turns depth delivery on after the format change. Before, depth was switched on too early, so Portrait reported \"Depth not available\". If a lens still has no depth, the message now names the camera."
+      ]
+    },
+    {
+      "version": "1.3",
+      "changes": [
+        "RAW: captures are now exposed 1 stop lower to protect highlights (DNG files were coming out too bright).",
+        "60 fps viewfinder: smoother preview when the camera has a 4:3 full-resolution format that supports it (a \"60\" shows top-left when active). Portrait and RAW stay at 30 fps.",
+        "New APPLE button (Photo mode): turns on Apple's own image processing (Smart HDR, Deep Fusion, tone mapping) and saves as HEIC. It switches RAW off.",
+        "New STEADY button: after you press the shutter, Lens waits for the motion sensors to show the phone has stopped shaking, then takes the photo. Tap the shutter again to cancel; it gives up and shoots after 2.5 s."
+      ]
+    },
+    {
+      "version": "1.2",
+      "changes": [
+        "Removed the M button and the manual ISO / shutter sliders. Exposure is fully automatic.",
+        "Renamed \"Night\" mode to \"Low Light\".",
+        "Front camera flash: when flash is on (or Auto in dim light) the screen turns white at full brightness, the photo is taken, then your brightness is restored.",
+        "Flash button now shows on the front camera.",
+        "Portrait rebuilt on Apple's native depth blur (CIDepthBlurEffect with the camera's own depth map). Blur is focused where you tap. Saves the original plus the blurred photo, and shows \"Depth not available\" if the lens can't supply depth."
+      ]
+    },
+    {
+      "version": "1.1",
+      "changes": [
+        "New Apple-style layout: rounded 3:4 viewfinder, mode selector, thumbnail / shutter / flip row, lens chips, haptics.",
+        "Added Portrait and Night modes.",
+        "Generated app icon."
+      ]
+    },
+    {
+      "version": "1.0",
+      "changes": [
+        "First native version: unprocessed PNG and RAW capture, lens switching, tap to focus, pinch zoom, mirrored selfies, saves to Photos."
+      ]
+    }
+  ]
+}

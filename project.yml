@@ -12,14 +12,15 @@ targets:
       - CameraModel.swift
       - ContentView.swift
       - Assets.xcassets
+      - changelog.json
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.debayan.lens
         PRODUCT_NAME: Lens
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
-        MARKETING_VERSION: "1.6.5"
-        CURRENT_PROJECT_VERSION: "12"
+        MARKETING_VERSION: "1.7.0"
+        CURRENT_PROJECT_VERSION: "13"
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_CFBundleDisplayName: Lens

@@ -53,6 +53,9 @@ struct ContentView: View {
     @StateObject private var m = CameraModel()
     @State private var baseZoom: CGFloat = 1
     @State private var pinching = false
+    @State private var flipAngle = 0.0
+    @State private var flipCover = 0.0
+    @State private var iconSpin = 0.0
     private let accent = Color(red: 1.0, green: 0.8, blue: 0.0)
 
     var body: some View {
@@ -61,6 +64,11 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 topBar.frame(height: 56)
                 viewfinder
+                    .rotation3DEffect(.degrees(flipAngle), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(.regularMaterial).opacity(flipCover).allowsHitTesting(false)
+                    }
                 Spacer(minLength: 0)
                 if m.mode == .portrait { blurSlider.padding(.horizontal, 28).padding(.bottom, 12) }
                 modeSelector.padding(.bottom, 16)
@@ -71,12 +79,9 @@ struct ContentView: View {
             }
         }
         .buttonStyle(PressStyle())      // flat buttons: stops iOS adding its own big circle behind them
-        .onAppear {
-            m.start()
-            m.announce("Lens " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""))
-        }
+        .onAppear { m.start() }
         .statusBarHidden()
-        .sheet(isPresented: Binding(get: { m.report != nil }, set: { if !$0 { m.dismissReport() } })) { reportSheet }
+        .sheet(isPresented: Binding(get: { m.whatsNew != nil }, set: { if !$0 { m.dismissWhatsNew() } })) { whatsNewSheet }
     }
 
     // MARK: Viewfinder
@@ -84,7 +89,7 @@ struct ContentView: View {
     var viewfinder: some View {
         ZStack {
             Preview(model: m)
-                .onTapGesture(count: 2) { m.flip() }
+                .onTapGesture(count: 2) { animatedFlip() }
                 .onTapGesture { m.focus(at: $0) }
                 .gesture(MagnificationGesture()
                     .onChanged { s in
@@ -96,6 +101,12 @@ struct ContentView: View {
             if let p = m.focusPoint {
                 Rectangle().stroke(accent, lineWidth: 1.5)
                     .frame(width: 74, height: 74).position(p).allowsHitTesting(false)
+            }
+            if m.countdown > 0 {
+                Text("\(m.countdown)")
+                    .font(.system(size: 110, weight: .thin))
+                    .foregroundColor(.white).shadow(radius: 8)
+                    .allowsHitTesting(false)
             }
             VStack {
                 if !m.toast.isEmpty { badge(m.toast).padding(.top, 10) }
@@ -154,6 +165,14 @@ struct ContentView: View {
                         .foregroundColor(m.flash == .off ? .white : accent)
                 }
             }
+            Button { m.cycleTimer() } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "timer").font(.system(size: 18, weight: .semibold))
+                    if m.timer > 0 { Text("\(m.timer)s").font(.system(size: 12, weight: .bold)) }
+                }
+                .foregroundColor(m.timer > 0 ? accent : .white)
+                .padding(.leading, 6)
+            }
             if m.mode == .night { Image(systemName: "moon.fill").foregroundColor(accent) }
             Spacer()
             if m.isFront {
@@ -178,27 +197,60 @@ struct ContentView: View {
 
     func pill(_ t: String, on: Bool, _ a: @escaping () -> Void) -> some View {
         Button(action: a) {
-            Text(t).font(.system(size: 12, weight: .bold))
+            Text(t).font(.system(size: 11, weight: .bold))
                 .foregroundColor(on ? .black : .white)
-                .padding(.horizontal, 11).padding(.vertical, 6)
+                .padding(.horizontal, 9).padding(.vertical, 6)
                 .background(Capsule().fill(on ? accent : Color.white.opacity(0.18)))
         }
     }
 
-    var reportSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Front camera formats").font(.headline)
-            ScrollView {
-                Text(m.report ?? "")
-                    .font(.system(size: 12, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+    var whatsNewSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("What's new").font(.title2.bold())
+                Spacer()
+                Text("v" + (m.whatsNew?.version ?? "")).font(.subheadline.monospaced()).foregroundColor(.secondary)
             }
-            Button("Close") { m.dismissReport() }
-                .font(.headline).frame(maxWidth: .infinity)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array((m.whatsNew?.changes ?? []).enumerated()), id: \.offset) { _, line in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("•").foregroundColor(accent)
+                            Text(line).font(.system(size: 14)).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+            Button {
+                if let u = URL(string: "https://raw.githubusercontent.com/debayan5/lens/main/changelog.json") {
+                    UIApplication.shared.open(u)
+                }
+            } label: {
+                HStack { Text("Full changelog"); Spacer(); Image(systemName: "chevron.right") }
+                    .padding(.vertical, 12).padding(.horizontal, 14)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.1)))
+            }
+            Button { m.dismissWhatsNew() } label: {
+                Text("Continue").font(.headline).foregroundColor(.black)
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(accent))
+            }
         }
         .padding(20)
         .presentationDetents([.medium, .large])
+    }
+
+    func animatedFlip() {
+        guard !m.busy, m.countdown == 0 else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.easeIn(duration: 0.2)) { flipAngle = 90; flipCover = 1; iconSpin += 180 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            m.flip()
+            flipAngle = -90
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                withAnimation(.easeOut(duration: 0.3)) { flipAngle = 0; flipCover = 0 }
+            }
+        }
     }
 
     var blurSlider: some View {
@@ -251,10 +303,11 @@ struct ContentView: View {
             }
             .buttonStyle(PressStyle())
             Spacer()
-            Button { m.flip() } label: {
+            Button { animatedFlip() } label: {
                 Image(systemName: "camera.rotate.fill")
                     .font(.system(size: 28)).foregroundColor(.white)
                     .frame(width: 54, height: 54)
+                    .rotationEffect(.degrees(iconSpin))
             }
         }
         .padding(.horizontal, 28)

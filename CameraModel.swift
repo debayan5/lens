@@ -8,6 +8,8 @@ import CoreMotion
 
 enum CamMode: String, CaseIterable { case photo = "PHOTO", portrait = "PORTRAIT", night = "LOW LIGHT" }
 
+struct WhatsNew { let version: String; let changes: [String] }
+
 final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate {
     let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
@@ -55,7 +57,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published var portraitLive = false
     @Published var showZoom = false
     private var zoomToken = 0
-    @Published var report: String?
+    @Published var whatsNew: WhatsNew?
+    @Published var timer = 0
+    @Published var countdown = 0
+    private var cdToken = 0
     private var volObs: NSKeyValueObservation?
     private var lastButton = Date.distantPast
     private var blurFactor = 0.017
@@ -68,7 +73,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func start() {
         watchVolume()
-        if !UserDefaults.standard.bool(forKey: "frontFormatReportShown") { report = frontFormatReport() }
+        checkWhatsNew()
         AVCaptureDevice.requestAccess(for: .video) { ok in
             guard ok else { return }
             let found = AVCaptureDevice.DiscoverySession(
@@ -272,37 +277,58 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         flash = flash == .off ? .auto : (flash == .auto ? .on : .off)
     }
 
-    // MARK: One-time front camera format report
+    // MARK: What's new popup
 
-    private func frontFormatReport() -> String {
-        guard let f = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
-            return "No front camera found."
+    private func checkWhatsNew() {
+        let cur = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        guard UserDefaults.standard.string(forKey: "lastSeenVersion") != cur else { return }
+        var changes: [String] = []
+        if let url = Bundle.main.url(forResource: "changelog", withExtension: "json"),
+           let data = try? Data(contentsOf: url),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let versions = obj["versions"] as? [[String: Any]],
+           let entry = versions.first(where: { ($0["version"] as? String) == cur }) ?? versions.first {
+            changes = entry["changes"] as? [String] ?? []
         }
-        var rows: [String] = []
-        var usable = false
-        for fmt in f.formats {
-            let fps = fmt.videoSupportedFrameRateRanges.map { $0.maxFrameRate }.max() ?? 0
-            guard fps >= 60 else { continue }
-            let d = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
-            let is43 = Int(d.width) * 3 == Int(d.height) * 4
-            let is169 = Int(d.width) * 9 == Int(d.height) * 16
-            let ratio = is43 ? "4:3" : (is169 ? "16:9" : "other")
-            let still = fmt.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width })
-            let stillText = still.map { "\($0.width)x\($0.height)" } ?? "?"
-            if is43 && d.width >= 1024 && (still?.width ?? 0) >= 4000 { usable = true }
-            let row = "\(d.width)x\(d.height)  \(ratio)  \(Int(fps)) fps  stills \(stillText)"
-            if !rows.contains(row) { rows.append(row) }
-        }
-        var out = "Formats that reach 60 fps (\(f.formats.count) formats in total):\n\n"
-        out += rows.isEmpty ? "none\n" : rows.joined(separator: "\n") + "\n"
-        out += "\nLens would use 60 fps on the front camera: " + (usable ? "YES" : "NO")
-        out += usable ? "" : "\n(no 4:3 format with 12 MP stills at 60 fps)"
-        return out
+        whatsNew = WhatsNew(version: cur, changes: changes)
     }
 
-    func dismissReport() {
-        report = nil
-        UserDefaults.standard.set(true, forKey: "frontFormatReportShown")
+    func dismissWhatsNew() {
+        whatsNew = nil
+        let cur = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        UserDefaults.standard.set(cur, forKey: "lastSeenVersion")
+    }
+
+    // MARK: Self-timer (off -> 3 s -> 5 s -> 10 s -> off)
+
+    func cycleTimer() {
+        timer = timer == 0 ? 3 : (timer == 3 ? 5 : (timer == 5 ? 10 : 0))
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func startCountdown(_ done: @escaping () -> Void) {
+        countdown = timer
+        cdToken += 1
+        let tok = cdToken
+        func step() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                guard tok == self.cdToken, self.countdown > 0 else { return }
+                self.countdown -= 1
+                if self.countdown == 0 { done() } else {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    step()
+                }
+            }
+        }
+        step()
+    }
+
+    private func cancelCountdown() { cdToken += 1; countdown = 0 }
+
+    private func setConnMirror(_ on: Bool) {
+        guard let c = output.connection(with: .video), c.isVideoMirroringSupported else { return }
+        c.automaticallyAdjustsVideoMirroring = false
+        c.isVideoMirrored = on
     }
 
     // MARK: Hardware buttons
@@ -366,8 +392,13 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     func capture() {
-        if waiting { motion.stopDeviceMotionUpdates(); waiting = false; return }   // tap again to cancel
+        if countdown > 0 { cancelCountdown(); return }                           // tap again to cancel the timer
+        if waiting { motion.stopDeviceMotionUpdates(); waiting = false; return }   // tap again to cancel steady wait
         guard !busy else { return }
+        if timer > 0 { startCountdown { self.captureNow() } } else { captureNow() }
+    }
+
+    private func captureNow() {
         if steady { waitSteady { self.performCapture() } } else { performCapture() }
     }
 
@@ -379,9 +410,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         let raw = rawMode && mode == .photo, fl = flash, m = mode
         let screen = isFront && needsFlash()
         let apple = captureApple
+        let mirrorSel = mirrorSelfie
 
         let shoot = {
             self.queue.async {
+                // Apple-processed front photos: let the camera mirror them itself (keeps Apple's processing intact)
+                self.setConnMirror(apple && mirrorSel && self.device?.position == .front)
                 let s: AVCapturePhotoSettings
                 if m == .portrait {
                     self.output.isDepthDataDeliveryEnabled = self.output.isDepthDataDeliverySupported
@@ -545,6 +579,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     private func nightGrab() {
         queue.async {
+            self.setConnMirror(false)
             let s = AVCapturePhotoSettings(format: self.bgra)
             s.photoQualityPrioritization = .speed
             self.quiet(s)
@@ -718,8 +753,8 @@ extension CameraModel: AVCaptureDataOutputSynchronizerDelegate {
 final class Sounds {
     static let shared = Sounds()
     private var click: AVAudioPlayer?
-    private var pad: AVAudioPlayer?
-    private var chime: AVAudioPlayer?
+    private var soft: AVAudioPlayer?
+    private var done: AVAudioPlayer?
     private let sr = 44100.0
 
     private init() {
@@ -732,19 +767,15 @@ final class Sounds {
             let n = Double.random(in: -1...1) * exp(-t * 260) * 0.15
             return a + b + n
         }
-        pad = make(6.0) { t in
-            var v = 0.0
-            for (i, f) in [220.0, 277.18, 329.63, 440.0].enumerated() {
-                v += sin(2 * .pi * f * t + Double(i)) * 0.07 + sin(2 * .pi * f * 1.004 * t) * 0.04
-            }
-            let swell = 0.75 + 0.25 * sin(2 * .pi * 0.35 * t)
-            return v * swell * min(t / 0.9, 1) * min((6.0 - t) / 0.5, 1)
+        soft = make(0.14) { t in
+            sin(2 * .pi * 1500 * t) * exp(-t * 80) * 0.22 + sin(2 * .pi * 200 * t) * exp(-t * 45) * 0.30
         }
-        chime = make(1.4) { t in
-            let e = min(t / 0.006, 1)
-            return e * (sin(2 * .pi * 880 * t) * exp(-t * 3.2) * 0.28
-                      + sin(2 * .pi * 1320 * t) * exp(-t * 4.5) * 0.16
-                      + sin(2 * .pi * 1760 * t) * exp(-t * 7) * 0.08)
+        done = make(0.45) { t in
+            func tick(_ x: Double, _ f: Double) -> Double {
+                guard x >= 0 else { return 0 }
+                return sin(2 * .pi * f * x) * exp(-x * 70) * 0.26 + sin(2 * .pi * 210 * x) * exp(-x * 42) * 0.24
+            }
+            return tick(t, 1700) + tick(t - 0.17, 2250)
         }
     }
 
@@ -767,10 +798,6 @@ final class Sounds {
     }
 
     func shutter() { click?.currentTime = 0; click?.play() }
-    func nightStart() { pad?.stop(); pad?.currentTime = 0; pad?.volume = 0.9; pad?.play() }
-    func nightEnd() {
-        pad?.setVolume(0, fadeDuration: 0.5)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { self.pad?.stop() }
-        chime?.currentTime = 0; chime?.play()
-    }
+    func nightStart() { soft?.currentTime = 0; soft?.play() }          // one soft tick when capture begins
+    func nightEnd() { done?.currentTime = 0; done?.play() }            // quick double tick when it's done
 }
